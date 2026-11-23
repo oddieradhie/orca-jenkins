@@ -1,0 +1,91 @@
+{
+  "$schema": "https://orca.stably.ai/schemas/orca-plugin.v2.json",
+  "manifestVersion": 2,
+  "id": "jenkins",
+  "name": "Jenkins",
+  "version": "1.0.0",
+  "description": "Jenkins CI/CD monitoring sidebar panel, status bar counter, build queue, console log viewer, and build triggers for Orca.",
+  "author": {
+    "name": "Fathur Radhie"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/oddieradhie/orca-jenkins",
+  "icon": "assets/jenkins-logo.png",
+  "execution": "trusted-worker",
+  "engines": {
+    "orca": ">=1.4.259"
+  },
+  "main": "src/worker.ts",
+  "capabilities": [
+    { "kind": "secrets:own" },
+    { "kind": "settings:own" },
+    { "kind": "storage:own" },
+    { "kind": "workspace:read" },
+    { "kind": "notifications:show" }
+  ],
+  "contributes": {
+    "panels": [
+      {
+        "id": "jenkins",
+        "title": "Jenkins",
+        "icon": "terminal",
+        "entry": "src/panel.tsx",
+        "ui": "components"
+      }
+    ],
+    "statusBarItems": [
+      {
+        "id": "jenkins-status",
+        "text": "Jenkins",
+        "icon": "terminal",
+        "tone": "neutral",
+        "tooltip": "Jenkins CI/CD build status",
+        "command": "jenkins.refresh"
+      }
+    ],
+    "commands": [
+      {
+        "id": "jenkins.refresh",
+        "title": "Jenkins: Refresh Builds",
+        "when": "global"
+      }
+    ],
+    "settings": [
+      {
+        "key": "jenkinsUrl",
+        "title": "Jenkins URL",
+        "description": "Base URL of your Jenkins server (e.g. https://jenkins.example.com).",
+        "type": "string",
+        "default": ""
+      },
+      {
+        "key": "username",
+        "title": "Jenkins Username",
+        "description": "Jenkins username for API authentication.",
+        "type": "string",
+        "default": ""
+      },
+      {
+        "key": "apiToken",
+        "title": "Jenkins API Token",
+        "description": "Jenkins API token (stored encrypted via secrets:own when configured in panel).",
+        "type": "string",
+        "default": ""
+      },
+      {
+        "key": "pollIntervalSec",
+        "title": "Poll Interval (seconds)",
+        "description": "How often to poll Jenkins for build updates (minimum 10 seconds).",
+        "type": "number",
+        "default": 30
+      },
+      {
+        "key": "viewName",
+        "title": "Jenkins View Filter",
+        "description": "Optional Jenkins view name to limit monitored jobs.",
+        "type": "string",
+        "default": ""
+      }
+    ]
+  }
+}
