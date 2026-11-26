@@ -865,6 +865,20 @@ function JobCard({ job }: { job: JenkinsJob }) {
   )
 }
 
+function splitJobName(fullName: string): { shortName: string; folder: string } {
+  const idx = fullName.lastIndexOf('/')
+  if (idx <= 0) return { shortName: fullName, folder: '' }
+  return {
+    folder: fullName.slice(0, idx),
+    shortName: fullName.slice(idx + 1)
+  }
+}
+
+function compactText(text: string, maxLen = 34): string {
+  if (text.length <= maxLen) return text
+  return `${text.slice(0, maxLen - 1)}…`
+}
+
 function QueueList({ queue }: { queue: JenkinsQueueItem[] }) {
   const busy = read(busyActionAtom)
 
@@ -879,38 +893,51 @@ function QueueList({ queue }: { queue: JenkinsQueueItem[] }) {
 
   return (
     <Stack gap="xs">
-      {queue.map((item) => (
-        <Box key={item.id} border={true} background="card" radius="md" padding="sm">
-          <Stack gap="xs">
-            <Row justify="between" align="center">
-              <Text size="sm" weight="semibold">
-                {item.jobName}
-              </Text>
-              <Row gap="xs">
-                {item.stuck && <Badge tone="danger">Stuck</Badge>}
-                {item.blocked && <Badge tone="warning">Blocked</Badge>}
-                <Button
-                  size="xs"
-                  variant="outline"
-                  tone="danger"
-                  disabled={busy === `cancelQueue:${item.id}`}
-                  onPress={() => void handleCancelQueue(item.id, item.jobName)}
-                >
-                  Cancel
-                </Button>
+      {queue.map((item) => {
+        const { shortName, folder } = splitJobName(item.jobName)
+        return (
+          <Box key={item.id} border={true} background="card" radius="md" padding="sm">
+            <Stack gap="xs">
+              <Row justify="between" align="center" gap="xs" wrap>
+                <Row gap="xs" align="center" wrap>
+                  <Badge tone="accent">
+                    {item.buildNumber ? `#${item.buildNumber}` : `Q#${item.id}`}
+                  </Badge>
+                  <Text size="sm" weight="semibold">
+                    {compactText(shortName, 32)}
+                  </Text>
+                </Row>
+                <Row gap="xs" align="center">
+                  {item.stuck && <Badge tone="danger">Stuck</Badge>}
+                  {item.blocked && <Badge tone="warning">Blocked</Badge>}
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    tone="danger"
+                    disabled={busy === `cancelQueue:${item.id}`}
+                    onPress={() => void handleCancelQueue(item.id, item.jobName)}
+                  >
+                    Cancel
+                  </Button>
+                </Row>
               </Row>
-            </Row>
-            <Text size="xs" tone="secondary">
-              {item.why || 'Waiting for available executor'}
-            </Text>
-            {item.inQueueSince > 0 && (
+              {folder && (
+                <Text size="xs" tone="secondary">
+                  {folder}
+                </Text>
+              )}
               <Text size="xs" tone="secondary">
-                Queued {formatRelativeTime(item.inQueueSince)}
+                {item.why || 'Waiting for available executor'}
               </Text>
-            )}
-          </Stack>
-        </Box>
-      ))}
+              <Text size="xs" tone="secondary">
+                {item.inQueueSince > 0
+                  ? `Queue #${item.id} · Queued ${formatRelativeTime(item.inQueueSince)}`
+                  : `Queue #${item.id}`}
+              </Text>
+            </Stack>
+          </Box>
+        )
+      })}
     </Stack>
   )
 }
@@ -1295,19 +1322,27 @@ function BuildsHistoryView({
             No active builds running on executors right now.
           </Text>
         ) : (
-          activeBuilds.map((b) => (
-            <Box key={`${b.jobFullName}#${b.number}`} border={true} background="card" radius="md" padding="sm">
-              <Stack gap="xs">
-                <Row justify="between" align="center">
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    onPress={() => void openJobDetail(makeStubJob(b.jobFullName, b.url))}
-                  >
-                    {b.jobFullName}
-                  </Button>
-                  <Badge tone="accent">{`#${b.number} Building`}</Badge>
-                </Row>
+          activeBuilds.map((b) => {
+            const { shortName, folder } = splitJobName(b.jobFullName)
+            return (
+              <Box key={`${b.jobFullName}#${b.number}`} border={true} background="card" radius="md" padding="sm">
+                <Stack gap="xs">
+                  <Row justify="between" align="center" gap="xs" wrap>
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      tooltip={b.jobFullName}
+                      onPress={() => void openJobDetail(makeStubJob(b.jobFullName, b.url))}
+                    >
+                      {compactText(shortName, 32)}
+                    </Button>
+                    <Badge tone="accent">{`#${b.number} Building`}</Badge>
+                  </Row>
+                  {folder && (
+                    <Text size="xs" tone="secondary">
+                      {folder}
+                    </Text>
+                  )}
 
                 {b.estimatedDuration && b.estimatedDuration > 0 && (
                   <Progress
@@ -1352,7 +1387,8 @@ function BuildsHistoryView({
                 </Row>
               </Stack>
             </Box>
-          ))
+            )
+          })
         )}
       </Stack>
 
@@ -1365,15 +1401,26 @@ function BuildsHistoryView({
         ) : (
           recentJobs.map((job) => {
             const last = job.lastBuild!
+            const { shortName, folder } = splitJobName(job.fullName)
             return (
               <Box key={`${job.fullName}#${last.number}`} border={true} background="card" radius="md" padding="sm">
                 <Stack gap="xs">
-                  <Row justify="between" align="center">
-                    <Button size="xs" variant="ghost" onPress={() => void openJobDetail(job)}>
-                      {job.fullName}
+                  <Row justify="between" align="center" gap="xs" wrap>
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      tooltip={job.fullName}
+                      onPress={() => void openJobDetail(job)}
+                    >
+                      {compactText(shortName, 32)}
                     </Button>
                     <Badge tone={statusTone(job.status)}>{`#${last.number} ${statusLabel(job.status)}`}</Badge>
                   </Row>
+                  {folder && (
+                    <Text size="xs" tone="secondary">
+                      {folder}
+                    </Text>
+                  )}
                   <Row justify="between" align="center">
                     <Text size="xs" tone="secondary">
                       {`${last.building ? 'Running' : formatDuration(last.duration)} · ${formatRelativeTime(last.timestamp)}`}

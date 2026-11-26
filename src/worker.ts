@@ -14,7 +14,7 @@ import type {
 } from './protocol'
 import './protocol'
 
-export const CURRENT_VERSION = '1.0.0'
+export const CURRENT_VERSION = '1.0.1'
 const CACHE_KEY = 'cachedDashboard'
 const CONFIG_STORAGE_KEY = 'jenkinsConfig'
 const FAVORITES_STORAGE_KEY = 'jenkinsFavorites'
@@ -66,7 +66,8 @@ type RawJenkinsQueueItem = {
   buildable?: boolean
   inQueueSince?: number
   url?: string
-  task?: { name?: string; fullName?: string; url?: string }
+  task?: { name?: string; fullName?: string; url?: string; nextBuildNumber?: number }
+  executable?: { number?: number }
 }
 
 type RawJenkinsParameterDef = {
@@ -584,7 +585,7 @@ export async function fetchDashboard(
       jenkinsJson<{ jobs?: RawJenkinsJob[] }>(config, jobsEndpoint, signal),
       jenkinsJson<{ items?: RawJenkinsQueueItem[] }>(
         config,
-        '/queue/api/json?tree=items[id,why,stuck,blocked,buildable,inQueueSince,url,task[name,fullName,url]]',
+        '/queue/api/json?tree=items[id,why,stuck,blocked,buildable,inQueueSince,url,task[name,fullName,url,nextBuildNumber],executable[number]]',
         signal
       ).catch(() => ({ items: [] })),
       jenkinsJson<RawJenkinsComputerRes>(
@@ -614,16 +615,21 @@ export async function fetchDashboard(
       return a.fullName.localeCompare(b.fullName)
     })
 
-    const queue: JenkinsQueueItem[] = (queueRes.items ?? []).map((item) => ({
-      id: Number(item.id ?? 0),
-      jobName: String(item.task?.fullName ?? item.task?.name ?? 'Unknown Job'),
-      why: String(item.why ?? ''),
-      stuck: Boolean(item.stuck),
-      blocked: Boolean(item.blocked),
-      buildable: Boolean(item.buildable),
-      inQueueSince: Number(item.inQueueSince ?? 0),
-      ...(item.url ? { url: String(item.url) } : {})
-    }))
+    const queue: JenkinsQueueItem[] = (queueRes.items ?? []).map((item) => {
+      const rawBuildNum = item.executable?.number ?? item.task?.nextBuildNumber
+      const buildNumber = typeof rawBuildNum === 'number' && rawBuildNum > 0 ? rawBuildNum : null
+      return {
+        id: Number(item.id ?? 0),
+        jobName: String(item.task?.fullName ?? item.task?.name ?? 'Unknown Job'),
+        ...(buildNumber !== null ? { buildNumber } : {}),
+        why: String(item.why ?? ''),
+        stuck: Boolean(item.stuck),
+        blocked: Boolean(item.blocked),
+        buildable: Boolean(item.buildable),
+        inQueueSince: Number(item.inQueueSince ?? 0),
+        ...(item.url ? { url: String(item.url) } : {})
+      }
+    })
 
     const activeBuilds = extractActiveBuilds(computerRes)
     const executors: JenkinsExecutorSummary = {

@@ -45,6 +45,7 @@ export type JenkinsJob = {
 export type JenkinsQueueItem = {
   id: number
   jobName: string
+  buildNumber?: number | null
   why: string
   stuck: boolean
   blocked: boolean

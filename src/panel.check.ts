@@ -68,6 +68,7 @@ const mockQueue = [
   {
     id: 77,
     jobName: 'core/auth-service',
+    buildNumber: 129,
     why: 'Waiting for next available executor',
     stuck: false,
     blocked: false,
