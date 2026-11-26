@@ -3,7 +3,7 @@
   "manifestVersion": 2,
   "id": "jenkins",
   "name": "Jenkins",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Jenkins CI/CD monitoring sidebar panel, status bar counter, build queue, console log viewer, and build triggers for Orca.",
   "author": {
     "name": "Fathur Radhie"

@@ -14,7 +14,7 @@ import type {
 } from './protocol'
 import './protocol'
 
-export const CURRENT_VERSION = '1.0.1'
+export const CURRENT_VERSION = '1.0.2'
 const CACHE_KEY = 'cachedDashboard'
 const CONFIG_STORAGE_KEY = 'jenkinsConfig'
 const FAVORITES_STORAGE_KEY = 'jenkinsFavorites'

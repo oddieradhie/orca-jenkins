@@ -1359,31 +1359,29 @@ function BuildsHistoryView({
                   />
                 )}
 
-                <Row justify="between" align="center">
-                  <Text size="xs" tone="secondary">
-                    {`${b.executor ?? 'Executor'} · started ${formatRelativeTime(b.timestamp)}`}
-                  </Text>
-                  <Row gap="xs">
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      onPress={() => {
-                        set(selectedJobAtom, makeStubJob(b.jobFullName, b.url))
-                        void openConsoleLog(b.jobFullName, b.number)
-                      }}
-                    >
-                      Console
-                    </Button>
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      tone="danger"
-                      disabled={busy === `stop:${b.jobFullName}:${b.number}`}
-                      onPress={() => void handleStopBuild(b.jobFullName, b.number)}
-                    >
-                      Stop
-                    </Button>
-                  </Row>
+                <Text size="xs" tone="secondary">
+                  {`${b.executor ?? 'Executor'} · started ${formatRelativeTime(b.timestamp)}`}
+                </Text>
+                <Row justify="end" gap="xs">
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onPress={() => {
+                      set(selectedJobAtom, makeStubJob(b.jobFullName, b.url))
+                      void openConsoleLog(b.jobFullName, b.number)
+                    }}
+                  >
+                    Console
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    tone="danger"
+                    disabled={busy === `stop:${b.jobFullName}:${b.number}`}
+                    onPress={() => void handleStopBuild(b.jobFullName, b.number)}
+                  >
+                    Stop
+                  </Button>
                 </Row>
               </Stack>
             </Box>
@@ -1421,7 +1419,7 @@ function BuildsHistoryView({
                       {folder}
                     </Text>
                   )}
-                  <Row justify="between" align="center">
+                  <Row justify="between" align="center" gap="xs" wrap>
                     <Text size="xs" tone="secondary">
                       {`${last.building ? 'Running' : formatDuration(last.duration)} · ${formatRelativeTime(last.timestamp)}`}
                     </Text>
