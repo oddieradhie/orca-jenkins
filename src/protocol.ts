@@ -42,6 +42,22 @@ export type JenkinsJob = {
   isFavorite?: boolean
 }
 
+const statusWeight: Record<JenkinsJobStatus, number> = {
+  building: 0,
+  failed: 1,
+  unstable: 2,
+  aborted: 3,
+  success: 4,
+  not_built: 5,
+  disabled: 6
+}
+
+export function compareJobs(a: JenkinsJob, b: JenkinsJob): number {
+  if (Boolean(a.isFavorite) !== Boolean(b.isFavorite)) return a.isFavorite ? -1 : 1
+  return (statusWeight[a.status] ?? 9) - (statusWeight[b.status] ?? 9) ||
+    a.fullName.localeCompare(b.fullName)
+}
+
 export type JenkinsQueueItem = {
   id: number
   jobName: string
@@ -168,7 +184,7 @@ declare module 'orca' {
     }
   }
 
-  interface PluginEvents {
+  interface PluginPanelEvents {
     'jenkins.refreshed': JenkinsDashboardData
   }
 }
