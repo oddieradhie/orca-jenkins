@@ -6,6 +6,7 @@ import {
   Callout,
   Card,
   Code,
+  derived,
   EmptyState,
   Heading,
   IconButton,
@@ -40,7 +41,7 @@ import type {
   JenkinsParameterDef,
   JenkinsQueueItem
 } from './protocol'
-import './protocol'
+import { compareJobs } from './protocol'
 
 type FeedbackState = {
   tone: Tone
@@ -52,6 +53,18 @@ type MainTab = 'builds' | 'queue' | 'jobs'
 type StatusFilter = 'all' | 'building' | 'failed' | 'success' | 'favorites'
 
 const dashboardAtom = atom<JenkinsDashboardData | null>(null)
+// Keep acknowledged favorites authoritative over stale dashboard and detail snapshots.
+const favoritesAtom = atom<ReadonlySet<string> | null>(null)
+const favoritePendingAtom = atom(false)
+const jobsAtom = derived(() => {
+  const jobs = read(dashboardAtom)?.jobs ?? []
+  const favorites = read(favoritesAtom)
+  if (!favorites) return jobs
+  return jobs.map((job) => {
+    const isFavorite = favorites.has(job.fullName)
+    return job.isFavorite === isFavorite ? job : { ...job, isFavorite }
+  }).sort(compareJobs)
+})
 const loadingAtom = atom<boolean>(true)
 const mainTabAtom = atom<MainTab>('defaultViewTab', 'builds', { persist: 'plugin' })
 const statusFilterAtom = atom<StatusFilter>('statusFilter', 'all', { persist: 'plugin' })
@@ -389,11 +402,25 @@ async function handleCancelQueue(id: number, jobName: string): Promise<void> {
 }
 
 async function handleToggleFavorite(fullName: string): Promise<void> {
-  set(busyActionAtom, `fav:${fullName}`)
+  if (isAborted() || read(favoritePendingAtom)) return
+  const errorTitle = 'Failed to update favorite'
+  set(favoritePendingAtom, true)
   try {
-    await plugin.request('jenkins.toggleFavorite', { fullName })
+    const res = await plugin.request('jenkins.toggleFavorite', { fullName })
+    if (isAborted()) return
+    if (!res.ok) throw new Error('The favorite was not saved. Please try again.')
+    set(favoritesAtom, new Set(res.favorites))
+    if (read(feedbackAtom)?.title === errorTitle) set(feedbackAtom, null)
+  } catch (err) {
+    if (!isAborted()) {
+      set(feedbackAtom, {
+        tone: 'danger',
+        title: errorTitle,
+        message: err instanceof Error ? err.message : String(err)
+      })
+    }
   } finally {
-    if (!isAborted()) set(busyActionAtom, null)
+    if (!isAborted()) set(favoritePendingAtom, false)
   }
 }
 
@@ -619,6 +646,7 @@ function JobDetailView({ job }: { job: JenkinsJob }) {
   }
 
   const activeJob = detail?.job ?? job
+  const isFavorite = read(favoritesAtom)?.has(activeJob.fullName) ?? activeJob.isFavorite
   const parameters = detail?.parameters ?? []
   const builds = detail?.builds ?? []
 
@@ -640,9 +668,10 @@ function JobDetailView({ job }: { job: JenkinsJob }) {
           <Button
             size="xs"
             variant="ghost"
+            disabled={read(favoritePendingAtom)}
             onPress={() => void handleToggleFavorite(activeJob.fullName)}
           >
-            {activeJob.isFavorite ? '★ Starred' : '☆ Star'}
+            {isFavorite ? '★ Starred' : '☆ Star'}
           </Button>
           {activeJob.url && (
             <IconButton
@@ -812,6 +841,7 @@ function JobCard({ job }: { job: JenkinsJob }) {
             <Button
               size="xs"
               variant="ghost"
+              disabled={read(favoritePendingAtom)}
               onPress={() => void handleToggleFavorite(job.fullName)}
             >
               {job.isFavorite ? '★' : '☆'}
@@ -1062,7 +1092,7 @@ export default function Panel() {
   const selectedJob = read(selectedJobAtom)
   const feedback = read(feedbackAtom)
 
-  const jobs = data?.jobs ?? []
+  const jobs = read(jobsAtom)
   const queue = data?.queue ?? []
   const activeBuilds = data?.activeBuilds ?? []
   const counts = data?.counts ?? {

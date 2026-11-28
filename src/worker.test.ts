@@ -1,4 +1,6 @@
-import { afterEach, assert, mockHost, mountWorker, test, type TestWorker } from 'orca/testing'
+import { afterEach, assert, mockHost, mount, mountWorker, test, type TestWorker } from 'orca/testing'
+import * as panel from './panel'
+import type { JenkinsDashboardData, JenkinsJobDetail } from './protocol'
 import * as main from './worker'
 
 const originalFetch = globalThis.fetch
@@ -155,6 +157,162 @@ test('saves config, fetches dashboard, and updates status bar cleanly', async ()
   assert.equal(saved.dashboard?.executors.total, 4)
   assert.ok(seenUrls.some((u) => u.includes('/me/api/json')))
   assert.deepEqual(activeWorker.refusals, [])
+})
+
+const favoriteTestSettings = {
+  jenkinsUrl: 'https://jenkins.example.invalid',
+  username: 'demo',
+  apiToken: 'x'.repeat(8)
+}
+
+function mockLargeDashboard() {
+  const jobs = Array.from({ length: 1040 }, (_, i) => {
+    const name = `synthetic-job-${String(i).padStart(4, '0')}`
+    const url = `${favoriteTestSettings.jenkinsUrl}/job/${name}/`
+    return {
+      name, fullName: name, url, color: 'blue',
+      lastBuild: {
+        number: 42, result: 'SUCCESS', building: false, timestamp: 1700000000000,
+        duration: 15000, url: `${url}42/`
+      }
+    }
+  })
+  const requests: string[] = []
+  globalThis.fetch = async (url) => {
+    const path = new URL(String(url)).pathname
+    requests.push(path)
+    return Response.json(path === '/api/json' ? { jobs } : {})
+  }
+  return requests
+}
+
+function jsonBytes(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).length
+}
+
+test('toggles favorites on a 1,040-job dashboard without a fetch or push', async () => {
+  const requests = mockLargeDashboard()
+  const host = mockHost({ settings: favoriteTestSettings })
+  activeWorker = await mountWorker(main, { host })
+  const dashboard = await activeWorker.request('jenkins.dashboard', { force: true })
+  assert.equal(dashboard.jobs.length, 1040)
+  assert.ok(jsonBytes(dashboard) > 256 * 1024)
+
+  const fullName = 'synthetic-job-0001'
+  requests.length = 0
+  const reply = await activeWorker.request('jenkins.toggleFavorite', { fullName })
+  assert.deepEqual(reply, { ok: true, favorites: [fullName] })
+  assert.ok(jsonBytes(reply) < 1024)
+  assert.deepEqual(await activeWorker.request('jenkins.toggleFavorite', { fullName }), {
+    ok: true, favorites: []
+  })
+  assert.deepEqual(requests, [], 'a favorite toggle must not fetch Jenkins')
+  assert.deepEqual(activeWorker.posts.map(({ event }) => event), [], 'a toggle must not push a dashboard')
+})
+
+test('keeps a 1,040-job panel in sync from favorite replies despite stale data', async (t) => {
+  const requests = mockLargeDashboard()
+  let dashboard: JenkinsDashboardData
+  let finishDashboard!: (data: JenkinsDashboardData) => void
+  let finishDetail!: (detail: JenkinsJobDetail) => void
+  const staleDashboard = new Promise<JenkinsDashboardData>((resolve) => { finishDashboard = resolve })
+  const staleDetail = new Promise<JenkinsJobDetail>((resolve) => { finishDetail = resolve })
+  const host = mockHost({
+    settings: favoriteTestSettings,
+    requests: {
+      'jenkins.dashboard': (input) => input?.force ? staleDashboard : dashboard,
+      'jenkins.jobDetail': () => staleDetail
+    }
+  })
+  activeWorker = await mountWorker(main, { host })
+  dashboard = await activeWorker.request('jenkins.dashboard', { force: true })
+  const job = dashboard.jobs.find((job) => job.fullName === 'synthetic-job-0001')!
+  const ui = await mount(panel, { host, persisted: { plugin: { defaultViewTab: 'jobs' } } })
+  t.after(() => ui.unmount())
+  const button = (text: string) => ({ type: 'Button', text })
+  const filter = { type: 'Tabs', label: 'Status Filter' }
+  const firstStar = ui.findAll(button('☆'))[0]!
+  const targetStar = ui.findAll(button('☆'))[1]!
+  requests.length = 0
+  const callCount = host.callsOf('plugin.request').length
+  await Promise.all([ui.press(targetStar), ui.press(targetStar), ui.press(firstStar)])
+  assert.ok(ui.find(button('★')), 'the row updates without a dashboard event')
+  assert.equal(ui.findAll({ type: 'Button', text: /^synthetic-job-/ })[0]?.text, job.name)
+  assert.deepEqual(host.callsOf('plugin.request').slice(callCount), [
+    { name: 'jenkins.toggleFavorite', input: { fullName: job.fullName } }
+  ])
+  assert.deepEqual(requests, [])
+  assert.deepEqual(activeWorker.posts.map(({ event }) => event), [])
+
+  await ui.post('jenkins.refreshed', dashboard)
+  assert.ok(ui.find(button('★')), 'a stale push must not undo a star')
+  await ui.select(filter, 'favorites')
+  assert.ok(ui.find(button(job.name)))
+
+  const actions = [
+    ui.press({ type: 'IconButton', label: 'Refresh Jenkins' }),
+    ui.press(button(job.name))
+  ]
+  const staleJob = { ...job, isFavorite: true }
+  try {
+    // Actions wait for all host requests, but another settle pass can render pending state.
+    await new Promise<void>(setImmediate)
+    actions.push(ui.press(button('★ Starred')), ui.settled())
+    await new Promise<void>(setImmediate)
+    assert.ok(ui.find(button('☆ Star')), 'the detail star updates before either read completes')
+  } finally {
+    finishDetail({ job: staleJob, builds: [], parameters: [] })
+    finishDashboard({
+      ...dashboard, fromCache: true,
+      jobs: dashboard.jobs.map((entry) => entry === job ? staleJob : entry)
+    })
+    await Promise.all(actions)
+  }
+  assert.ok(ui.find(button('☆ Star')), 'a late detail response must not restore a removed star')
+  await ui.press(button('← Back'))
+  assert.ok(ui.find({ type: 'Badge', text: 'Cached' }))
+  assert.equal(ui.find(button(job.name)), null, 'the late cached dashboard must not restore the favorite')
+  assert.deepEqual(ui.errors, [])
+})
+
+test('shows favorite failures without changing the saved star and permits retry', async (t) => {
+  const job = {
+    name: 'synthetic-job', fullName: 'synthetic-job', url: 'https://jenkins.example.invalid/job/synthetic-job/',
+    status: 'success' as const, color: 'blue', building: false, buildable: true, inQueue: false
+  }
+  const host = mockHost({ requests: {
+    'jenkins.dashboard': {
+      jobs: [job], queue: [], activeBuilds: [], executors: { busy: 0, total: 0 },
+      counts: { building: 0, failed: 0, unstable: 0, success: 1, total: 1, queue: 0 }, fetchedAt: 0
+    }
+  } })
+  const ui = await mount(panel, { host, persisted: { plugin: { defaultViewTab: 'jobs' } } })
+  t.after(() => ui.unmount())
+  const star = { type: 'Button', text: '☆' }
+  let failWrite!: (error: Error) => void
+  const failedWrite = new Promise<never>((_, reject) => { failWrite = reject })
+  host.respond('plugin.request', () => failedWrite)
+  const pressing = ui.press(star)
+  try {
+    await new Promise<void>(setImmediate)
+    assert.equal(ui.find(star)?.disabled, true)
+  } finally {
+    failWrite(new Error('Storage unavailable'))
+    await pressing
+  }
+  assert.ok(ui.find({ type: 'Callout', label: 'Failed to update favorite' }))
+  assert.ok(ui.find({ type: 'Text', text: 'Storage unavailable' }))
+  assert.equal(ui.find(star)?.disabled, false)
+
+  host.respond('plugin.request', { output: { ok: false, favorites: [job.fullName] } })
+  await ui.press(star)
+  assert.ok(ui.find({ type: 'Callout', label: 'Failed to update favorite' }))
+  assert.equal(ui.find(star)?.disabled, false)
+
+  host.respond('plugin.request', { output: { ok: true, favorites: [job.fullName] } })
+  await ui.press(star)
+  assert.ok(ui.find({ type: 'Button', text: '★' }))
+  assert.equal(ui.find({ type: 'Callout', label: 'Failed to update favorite' }), null)
 })
 
 test('fetches jobDetail, triggers parameterized build with crumb, and reads consoleLog', async () => {

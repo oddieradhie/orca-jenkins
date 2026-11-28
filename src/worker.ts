@@ -12,7 +12,7 @@ import type {
   JenkinsParameterDef,
   JenkinsQueueItem
 } from './protocol'
-import './protocol'
+import { compareJobs } from './protocol'
 
 export const CURRENT_VERSION = '1.0.2'
 const CACHE_KEY = 'cachedDashboard'
@@ -596,24 +596,7 @@ export async function fetchDashboard(
       readFavorites(orca)
     ])
 
-    const jobs = flattenJobs(jobsRes.jobs ?? [], favorites)
-    // Sort: favorites first, then building, then failed, then unstable, then alphabetical
-    const statusWeight: Record<JenkinsJobStatus, number> = {
-      building: 0,
-      failed: 1,
-      unstable: 2,
-      aborted: 3,
-      success: 4,
-      not_built: 5,
-      disabled: 6
-    }
-    jobs.sort((a, b) => {
-      if (Boolean(a.isFavorite) !== Boolean(b.isFavorite)) return a.isFavorite ? -1 : 1
-      const wa = statusWeight[a.status] ?? 9
-      const wb = statusWeight[b.status] ?? 9
-      if (wa !== wb) return wa - wb
-      return a.fullName.localeCompare(b.fullName)
-    })
+    const jobs = flattenJobs(jobsRes.jobs ?? [], favorites).sort(compareJobs)
 
     const queue: JenkinsQueueItem[] = (queueRes.items ?? []).map((item) => {
       const rawBuildNum = item.executable?.number ?? item.task?.nextBuildNumber
@@ -1127,8 +1110,6 @@ export default async function activate(orca: OrcaWorkerApi): Promise<void> {
     }
     const list = Array.from(favorites)
     await orca.storage.set(FAVORITES_STORAGE_KEY, list)
-    const dashboard = await fetchDashboard(orca)
-    orca.panels.post('jenkins.refreshed', dashboard)
     return cleanJson({ ok: true, favorites: list })
   })
 
