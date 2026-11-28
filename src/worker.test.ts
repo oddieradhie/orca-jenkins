@@ -157,6 +157,37 @@ test('saves config, fetches dashboard, and updates status bar cleanly', async ()
   assert.deepEqual(activeWorker.refusals, [])
 })
 
+test('returns fresh dashboard jobs when the cache write is rejected', async () => {
+  let jobName = 'synthetic-cached-job'
+  globalThis.fetch = (async (url) => Response.json(
+    new URL(String(url)).pathname === '/api/json'
+      ? { jobs: [{ name: jobName, color: 'blue' }] }
+      : {}
+  )) as typeof fetch
+
+  const host = mockHost({
+    settings: {
+      jenkinsUrl: 'https://jenkins.example.invalid',
+      username: 'demo',
+      apiToken: 'synthetic-token'
+    }
+  })
+  activeWorker = await mountWorker(main, { host })
+
+  await activeWorker.request('jenkins.dashboard', { force: true })
+  jobName = 'synthetic-fresh-job'
+  const cached = await activeWorker.request('jenkins.dashboard', { force: false })
+  assert.deepEqual(cached.jobs.map((job) => job.fullName), ['synthetic-cached-job'])
+
+  host.respond('storage.set', () => {
+    throw new Error('Storage value exceeds 256 KiB')
+  })
+  const fresh = await activeWorker.request('jenkins.dashboard', { force: true })
+  assert.deepEqual(fresh.jobs.map((job) => job.fullName), ['synthetic-fresh-job'])
+  assert.equal(fresh.fromCache, false)
+  assert.equal(fresh.error, undefined)
+})
+
 test('fetches jobDetail, triggers parameterized build with crumb, and reads consoleLog', async () => {
   let triggeredBody = ''
   let triggeredCrumb = ''

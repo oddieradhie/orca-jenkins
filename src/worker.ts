@@ -655,7 +655,11 @@ export async function fetchDashboard(
       currentVersion: CURRENT_VERSION
     })
 
-    await orca.storage.set(CACHE_KEY, data as unknown as JsonValue)
+    try {
+      await orca.storage.set(CACHE_KEY, data as unknown as JsonValue)
+    } catch {
+      orca.log('Jenkins dashboard cache write failed')
+    }
     await notifyStatusTransitions(orca, jobs)
     updateStatusBar(orca, data)
     void startedAt
